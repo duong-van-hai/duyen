@@ -315,13 +315,18 @@ function buildDoc(ims){
     doc.addImage(p.data,'JPEG',p.x,p.y,p.w,p.h)});
   return doc;
 }
+async function saveFile(fn,blob,dl){
+  if(dl){await dl.save({filename:fn,data:blob});return}
+  var u=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=u;a.download=fn;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(u)},4000);
+}
 var tick=function(){return new Promise(function(r){setTimeout(r,0)})};
 $('go').onclick=async function(){
   if(!S.items.length)return;
   var btn=this;btn.disabled=true;say('Đang tạo file…');
   try{
     var dl=null;try{dl=await claude.use('downloads')}catch(e){}
-    if(!dl){say('Chức năng tải file chưa dùng được ở đây. Hãy mở trang này trong claude.ai.',true);btn.disabled=false;return}
     var paper=$('paper').value,n=S.items.length,fn,blob;
     if(n===1||S.out==='one'){
       await tick();blob=buildDoc(S.items.map(function(o){return o.img})).output('blob');
@@ -335,7 +340,7 @@ $('go').onclick=async function(){
       }
       blob=await zip.generateAsync({type:'blob'});fn='pdf-'+n+'-anh-'+paper+'.zip';
     }
-    await dl.save({filename:fn,data:blob});
+    await saveFile(fn,blob,dl);
     say('Đã tạo '+fn+'. Khi in, chọn tỉ lệ 100% (Actual size), đừng chọn "Fit to page".');
   }catch(err){
     if(err&&err.code==='declined')say('Bạn đã hủy lưu file. Bấm lại để thử lần nữa.');

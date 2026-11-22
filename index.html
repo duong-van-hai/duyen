@@ -94,6 +94,13 @@ i[data-h=nw]{left:0;top:0;cursor:nwse-resize}i[data-h=n]{left:50%;top:0;cursor:n
     <button type="button" data-v="cover" aria-pressed="false">Phủ kín</button>
     <button type="button" data-v="stretch" aria-pressed="false">Kéo giãn</button>
    </div></div>
+  <div class="field"><span class="l">Chỉnh ảnh trước khi xuất</span>
+   <label for="brt" style="font-size:13px;color:var(--mute);margin:0">Độ sáng: <b id="brtV">0</b></label>
+   <input type="range" id="brt" min="-100" max="100" value="0">
+   <label for="con" style="font-size:13px;color:var(--mute);margin:0">Độ tương phản: <b id="conV">0</b></label>
+   <input type="range" id="con" min="-100" max="100" value="0">
+   <div class="seg" data-key="adj" style="margin:6px 0"><button type="button" data-v="one" aria-pressed="true">Ảnh này</button><button type="button" data-v="all" aria-pressed="false">Tất cả ảnh</button></div>
+   <button type="button" class="sec" id="adjReset" style="margin:0;padding:6px;font-size:13px">Đặt lại độ sáng và tương phản</button></div>
   <div class="field"><span class="l">Khi có nhiều ảnh</span>
    <div class="seg" data-key="out">
     <button type="button" data-v="one" aria-pressed="true">Gộp 1 file PDF</button>
@@ -133,7 +140,7 @@ i[data-h=nw]{left:0;top:0;cursor:nwse-resize}i[data-h=n]{left:50%;top:0;cursor:n
 <script>
 (function(){
 var SIZES={A3:[297,420],A4:[210,297],A5:[148,210],A6:[105,148],B5:[176,250],Letter:[215.9,279.4],Legal:[215.9,355.6],Photo10x15:[100,150],Photo13x18:[130,180]};
-var S={orient:'auto',fit:'contain',out:'one',scope:'one',img:null,name:'anh',items:[],cur:0};
+var S={orient:'auto',fit:'contain',out:'one',scope:'one',adj:'one',img:null,name:'anh',items:[],cur:0};
 var $=function(id){return document.getElementById(id)};
 var msg=$('msg');
 function say(t,err){msg.textContent=t;msg.className='msg'+(err?' err':'')}
@@ -158,7 +165,7 @@ function render(){
 }
 function pick(i){
   $('cropBtn').disabled=false;
-  var it=S.items[i];S.cur=i;S.img=it.img;S.name=it.name;$('pimg').src=it.url;
+  var it=S.items[i];S.cur=i;S.img=it.img;S.name=it.name;$('pimg').src=it.url;syncAdj(it);
   var t=$('thumbs');t.innerHTML='';
   if(S.items.length>1)S.items.forEach(function(o,j){
     var b=document.createElement('button');b.type='button';b.className='th';b.title=o.name;
@@ -207,11 +214,18 @@ document.querySelectorAll('.seg').forEach(function(g){
 });
 window.addEventListener('resize',render);
 
-function toJpeg(im,sx,sy,sw,sh){
+function toJpeg(im,sx,sy,sw,sh,adj){
   var c=document.createElement('canvas'),max=4000,s=Math.min(1,max/Math.max(sw,sh));
   c.width=Math.max(1,Math.round(sw*s));c.height=Math.max(1,Math.round(sh*s));
   var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
   x.drawImage(im,sx,sy,sw,sh,0,0,c.width,c.height);
+  if(adj&&(adj.br||adj.ct)){
+    var b=1+(adj.br||0)/100,k=1+(adj.ct||0)/100,lut=new Uint8ClampedArray(256),i;
+    for(i=0;i<256;i++)lut[i]=(i*b-128)*k+128;
+    var id=x.getImageData(0,0,c.width,c.height),d=id.data;
+    for(i=0;i<d.length;i+=4){d[i]=lut[d[i]];d[i+1]=lut[d[i+1]];d[i+2]=lut[d[i+2]]}
+    x.putImageData(id,0,0);
+  }
   return c.toDataURL('image/jpeg',0.92);
 }
 
@@ -299,18 +313,31 @@ $('cReset').onclick=function(){
   targets().forEach(function(it){if(it.url!==it.ourl)URL.revokeObjectURL(it.url);it.img=it.orig;it.url=it.ourl});
   closeCrop();pick(S.cur);say('Đã khôi phục ảnh gốc.');
 };
-function place(im){
+function adjTargets(){return S.adj==='all'?S.items:(S.items.length?[S.items[S.cur]]:[])}
+function syncAdj(it){
+  var b=it.br||0,c=it.ct||0;
+  $('brt').value=b;$('con').value=c;$('brtV').textContent=b;$('conV').textContent=c;
+  $('pimg').style.filter=(b||c)?'brightness('+(1+b/100)+') contrast('+(1+c/100)+')':'';
+}
+['brt','con'].forEach(function(id){$(id).oninput=function(){
+  if(!S.items.length)return;var v=+this.value;
+  adjTargets().forEach(function(it){if(id==='brt')it.br=v;else it.ct=v});
+  syncAdj(S.items[S.cur])}});
+$('adjReset').onclick=function(){
+  if(!S.items.length)return;
+  adjTargets().forEach(function(it){it.br=0;it.ct=0});syncAdj(S.items[S.cur])};
+function place(im,adj){
   var d=pageDims(im),pw=d[0],ph=d[1],m=+$('margin').value,aw=pw-2*m,ah=ph-2*m;
   var iw=im.naturalWidth,ih=im.naturalHeight,x=m,y=m,w=aw,h=ah,data;
-  if(S.fit==='contain'){var k=Math.min(aw/iw,ah/ih);w=iw*k;h=ih*k;x=m+(aw-w)/2;y=m+(ah-h)/2;data=toJpeg(im,0,0,iw,ih)}
-  else if(S.fit==='cover'){var r=aw/ah,cw=iw,ch=iw/r;if(ch>ih){ch=ih;cw=ih*r}data=toJpeg(im,(iw-cw)/2,(ih-ch)/2,cw,ch)}
-  else data=toJpeg(im,0,0,iw,ih);
+  if(S.fit==='contain'){var k=Math.min(aw/iw,ah/ih);w=iw*k;h=ih*k;x=m+(aw-w)/2;y=m+(ah-h)/2;data=toJpeg(im,0,0,iw,ih,adj)}
+  else if(S.fit==='cover'){var r=aw/ah,cw=iw,ch=iw/r;if(ch>ih){ch=ih;cw=ih*r}data=toJpeg(im,(iw-cw)/2,(ih-ch)/2,cw,ch,adj)}
+  else data=toJpeg(im,0,0,iw,ih,adj);
   return {pw:pw,ph:ph,x:x,y:y,w:w,h:h,data:data};
 }
 function buildDoc(ims){
   var J=window.jspdf.jsPDF,doc=null;
-  ims.forEach(function(im,i){
-    var p=place(im),o=p.pw>p.ph?'l':'p',f=[Math.min(p.pw,p.ph),Math.max(p.pw,p.ph)];
+  ims.forEach(function(it,i){
+    var p=place(it.img,it),o=p.pw>p.ph?'l':'p',f=[Math.min(p.pw,p.ph),Math.max(p.pw,p.ph)];
     if(i===0)doc=new J({orientation:o,unit:'mm',format:f,compress:true});else doc.addPage(f,o);
     doc.addImage(p.data,'JPEG',p.x,p.y,p.w,p.h)});
   return doc;
@@ -329,14 +356,14 @@ $('go').onclick=async function(){
     var dl=null;try{dl=await claude.use('downloads')}catch(e){}
     var paper=$('paper').value,n=S.items.length,fn,blob;
     if(n===1||S.out==='one'){
-      await tick();blob=buildDoc(S.items.map(function(o){return o.img})).output('blob');
+      await tick();blob=buildDoc(S.items).output('blob');
       fn=(n===1?S.items[0].name:'anh-gop-'+n+'-trang')+'-'+paper+'.pdf';
     }else{
       var zip=new JSZip(),pad=String(n).length;
       for(var i=0;i<n;i++){
         say('Đang tạo PDF '+(i+1)+'/'+n+'…');await tick();
         var o=S.items[i];
-        zip.file(String(i+1).padStart(pad,'0')+'-'+o.name+'-'+paper+'.pdf',buildDoc([o.img]).output('blob'));
+        zip.file(String(i+1).padStart(pad,'0')+'-'+o.name+'-'+paper+'.pdf',buildDoc([o]).output('blob'));
       }
       blob=await zip.generateAsync({type:'blob'});fn='pdf-'+n+'-anh-'+paper+'.zip';
     }
